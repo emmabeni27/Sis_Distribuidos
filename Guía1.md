@@ -230,4 +230,32 @@ Retry: Pago ID 123 → ya existe → NO volver a debitar
 
 PROPIEDAD BUSCADA: IDEMPOTENCIA
 
-19) 
+19) El costo que introduce la idempotencia es que hay que agregar estado y lógica para recordar operaciones anteriores. 
+Pagar $10.000 + ID 123 --> comprobar si 123 ya fue procesado --> procesar o devolver resultado anterior.
+
+Agrega:
+* almacenamiento de los IDs procesados;
+* persistencia de los resultados;
+* lógica adicional de deduplicación;
+* mayor complejidad;
+* necesidad de definir cuánto tiempo conservar esos IDs/resultados.
+
+El costo de la idempotencia es agregar estado, almacenamiento y complejidad para poder reconocer y tratar como una misma operación las solicitudes repetidas.
+
+20) Garantía: durante una partición, los usuarios podrán seguir viendo y publicando contenido, pero puede existir un retraso temporal en la propagación de publicaciones, likes o comentarios entre nodos.
+
+Nodo A ←── partición ──→ Nodo B
+
+Usuario 1 publica en A
+        ↓
+A muestra la publicación
+
+B todavía no la conoce
+        ↓
+Usuario 2 puede no verla todavía
+
+Cuando se recupera la conectividad, los nodos sincronizan los cambios.
+
+Trade off: Mayor disponibilidad durante la partición → menor consistencia inmediata.
+
+Es razonable en redes sociales porque no es crítico que un like o publicación aparezca exactamente al msimo tiempo para todos
