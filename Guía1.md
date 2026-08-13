@@ -178,3 +178,56 @@ T: puede haber demoras en la actualización del estado de la entrega, pero el us
 
 **Nivel 4**: integración y defensa
 
+16) 
+P: problema → autenticación distribuida con múltiples servidores
+
+F: fallas asumidas → pérdida de conectividad, caída de un servidor,
+                      retrasos en las respuestas
+
+G: garantía requerida → no autenticar incorrectamente a un usuario
+                        y mantener un estado de autenticación coherente
+
+S: solución elegida → servicio de autenticación centralizado/replicado,
+                      tokens de sesión con identificador único y
+                      validación del token antes de permitir el acceso
+
+T: mayor complejidad y dependencia de la infraestructura de autenticación
+   → menor disponibilidad durante fallas o particiones
+
+Es preferible rechazar temporalmente una autenticación antes que aceptar incorrectamente a un usuario. 
+
+17)
+**Solución A — Idempotencia**
+Request ID único + deduplicación + persistencia del resultado
+Evita que el retry ejecute dos veces el pago.
+El cliente puede reintentar de forma segura.
+Requiere guardar estado y mantenerlo disponible.
+
+Trade-off: más complejidad y almacenamiento → mayor disponibilidad para los retries.
+
+**Solución B — Bloquear nuevas operaciones hasta confirmar**
+Si el pago queda incierto, se bloquean nuevas operaciones sobre la cuenta.
+Se evita que el usuario genere operaciones incompatibles.
+
+Trade-off: mayor consistencia/seguridad → menor disponibilidad.
+
+Las dos soluciones buscan evitar inconsistencias, pero la primera prioriza la disponibilidad mediante idempotencia, mientras que la segunda resigna disponibilidad para simplificar el control del estado.
+
+18)
+    * El cliente genera un ID único para cada operación de pago.
+    * Envía el pago junto con ese ID.
+    * El servidor procesa el pago y guarda el resultado asociado al ID.
+    * Si el cliente recibe un timeout, vuelve a enviar la misma solicitud con el mismo ID.
+    * El servidor detecta que ese ID ya fue procesado.
+    * No vuelve a ejecutar el débito y devuelve el resultado previamente almacenado.
+    * 
+Pago ID 123 → procesar → débito $10.000 → guardar resultado
+
+          ↓ respuesta perdida
+
+Retry: Pago ID 123 → ya existe → NO volver a debitar
+                    → devolver resultado anterior
+
+PROPIEDAD BUSCADA: IDEMPOTENCIA
+
+19) 
