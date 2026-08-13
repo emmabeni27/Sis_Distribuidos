@@ -25,7 +25,7 @@ y la transacción no fue atómica.
 
 F: pérdida de respuesta (¡Compra exitosa!, delay y poterior timeout, retry del cliente --> se puede realizar un pago doble)
 
-G: se busca garantizar la atomicidad de la transacción. El usuario debe estar constantemente informado del estado de la transacción (evita un neuvo intento de pago).
+G: se busca garantizar la ~~atomicidad~~ [no es la atomicidad sino asegurar que sea transaccional] de la transacción. El usuario debe estar constantemente informado del estado de la transacción (evita un neuvo intento de pago).
 Si ocurre una interrupción en el procesamiento de pago, se debe detener el proceso, hacer un roll back de la operación y recién leugo, un reintento.
 
 S: ID único para la transacción y estado persistente asociado: SUCCESS, FAILED, PENDING
