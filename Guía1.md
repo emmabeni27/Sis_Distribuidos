@@ -1,82 +1,53 @@
-Guía 1 - Introducción
+**Nivel 1**: fundamentos y reconocimiento
+https://www.doniacld.com/posts/2021-10-06-10-concepts-distributed-systems/
 
-Sistemas centralizados, descentralizados y distribuídos
+1) Es una colección de computadoras independientes que se presenta ante el usuario como si fuera una sola computadora. 
+Desde una óptica operativa se puede decir que un sistema distribuído es un conjunto de procesos o nodos que:
+- Se ejecutan en máquinas distintas
+- Se comunican por intercambio de mensajes
+- Cooperan para ofrecer una abstracción que el usuario persibe como un solo sistema. 
 
-Gmail: distribuido centralizado. Hay muchos servidores distribuidos geográficamente que almacenan y procesan correos. Pero esos servidores pertenecen en su totalidad y están bajo el control de Google. No son nodos independientes que deciden entre sí cómo funciona Gmail. 
+Por todo lo mencionado:
+- la comunicación no es instantánea
+- las fallas son parciales
+- el conocimiento del estado global es limitado
 
-Spotify, Netflix: misma clasificación. Son muchos servidores con el contenido repartido entre ellos pero trabajan coordinadamente y toda la infraestructura y decisiones con controladas por la misma empresa.  
+Resumiendo, el problema se vuelve distribuído cuadno la corrección depende de coordinar componentes que no comparten memoria, reloj ni observación perfecta. 
 
-https://www.xataka.com/basics/servidores-nas-que-como-funcionan-que-puedes-hacer-uno
-Server NAS: un servidor de este tipo es centralizado pero si todo el almacenamiento se encuentra en el mismo, NO es distribuido.
-Si hubiera varios NAS cooperando, ahí sí lo podríamos ingresar a la categoría de distribuido. Pero en general la idea es que centraliza porque varios clientes dependen de un único servidor e almacenamiento. 
+2) Una demora suficientemente larga genera incertidumbre porque no se mantiene actualizado/al tanto al cliente del proceso que se está llevando a cabo. 
+Entonces bien podría no haberse comunicado una falla O seguir esperando un resultado que lelgará dentro de X tiempo. Aunque funcionara, hbaría excedido al tiempo racional de espera
+y la comunicación además sería deficiente.
 
-Home assistant: distribuido centralizado. Centralizado porque corre en un dispositivo central que mantiene el estado de los dispositivos, recibe automatizaciones, manda comandos. 
-Sería distribuido si consideramos el lado de los sensores. 
+3) Shazam: la aplicación captura el audio en tu teléfono, pero el procesamiento/comparación con su enorme base de datos se realiza mediante infraestructura remota.
+A veces se activa la app para detectar una canción y no da una respuesta. Sin embargo, ha sucedido que horas o días después se notifica la canción buscada. 
+Para esa instancia el usuario ya suponía que la detección había fallado. 
+En ese caso particular, el timeout no implicó crash. 
 
-IA corriendo en un data centre: depende. 
-Si corre en un único servidor (nodo único) --> centralizado
-Los servidores trabajan juntos pero pertenecen a la misma infraestructura y hay autoridad coordinadora  --> distribuído. Ejemplo: cada GPU hace una parte diferente. Todas pertenecen a google. 
-Si no hay un servidor jefe que las controla y se coordinan por protocolo/reglas comunes--> descentralizado. 
+4) La percepción de la red como un canal instantáneo y perfecto se construye sobre algunas falacias como:
+    - La red es confiable: se supone que la información simepre llegará a destino
+    - La latencia es cero
+    - El ancho de banda es infinito
+    - La red es segura
+    - La topología nunca cambia
+    - Sólo hay un administrador
+    - El costo de transporte es cero
+    - La red es homogénea
+5) Para el cleinte el timeout puede resultar indistiguible de un crash. Pero un timeout significa que el cliente no recibió una respuesta dentro del tiempo esperado. Pero eso puede ocurrir por muchas razones:
+   * El servidor efectivamente se cayó.
+   * La red está congestionada o se perdió un mensaje.
+   * La respuesta del servidor se perdió durante la transmisión.
+   * El servidor está funcionando, pero está sobrecargado y tarda demasiado.
+   * Hay un problema en algún nodo intermedio de la red.
+En un sistema distribuido, el cliente no puede determinar con certeza qué ocurrió solamente a partir de que no recibió una respuesta. Esto se relaciona con la incertidumbre/falla parcial característica de los sistemas distribuidos.
 
+**Nivel 2**: ejecuciones y fallas
 
-Cluster de virtualización de computadoras: es distribuido porque los recursos de cómputo están distribuidos entre varios nodos.
-Podría haber un control centralizado o no. 
-
-Tótem de información en el medio de un parque: todo el sistema está concentrado en un único dispositivo. Es centralizado porque no hay varios nodos colaborando. 
-No es distribuido porque es el único nodo prestando el servicio (asumo que es el único). No es descentralizado porque no hay varios tomando decisiones.  
------------------------------------------------------------------------------------------
-Centralizado pero distribuido: nodos de edge computing procesan datos localmente cada uno pero todo se centraliza en una empresa que administra la totalidad de los datos. Se recolecta en muchos puntos pero almacena en una única DB. 
-
-Descentralizado: blockchain. No hay un servidor central que coordine todo, son simplemente nodos interactuando. Cada nodo mantiene una copia (o parte de la información necesaria) y se comunica con los demás.
-
-Cajero automático
-
-Un cajero automático es un sistema que permite a los usuarios realizar operaciones bancarias, como retirar dinero, consultar el saldo o realizar depósitos, mediante una interfaz electrónica. El cajero se comunica con los sistemas centrales del banco para verificar la identidad del usuario, consultar su cuenta y autorizar las operaciones.
-Clasificación: centralizado.
-
-Se clasifica como un sistema centralizado porque las operaciones dependen de los sistemas centrales del banco. El cajero funciona principalmente como un punto de acceso al servicio, mientras que la información de las cuentas y la validación de las operaciones se gestionan en la infraestructura central del banco.
-
-              BANCO
-        Sistema central
-          /    |    \
-         /     |     \
-       ATM    ATM    ATM
-
-Aunque existan muchos cajeros distribuidos geográficamente, no significa que el sistema sea distribuido: los cajeros no colaboran entre sí para realizar el procesamiento de las operaciones, sino que actúan como clientes que acceden al sistema central.
-Conclusión: el cajero automático es un ejemplo de sistema centralizado, ya que el procesamiento y la información principal se encuentran centralizados en la infraestructura del banco.
-
------------------------------------------------------------------------------------------
-https://www.xataka.com/basics/plex-que-es-y-como-funciona
-
-Si tuviera más de un disco con copias de la información y debiera asegurar la consistencia entre todos ellos, el sistema pasaría a involucrar múltiples nodos que deben coordinarse y replicar la información. En ese caso, el trabajo estaría repartido entre distintos nodos, por lo que sería un sistema distribuido.
-
-Otra opción: agregar más raspberries, todas colaborando para plex. 
-
-https://chatgpt.com/share/6a777293-03ac-83e9-b2e0-ec33fec7c7d9
-
-Problemas de los sistemas distribuídos
-https://www.baeldung.com/cs/distributed-systems-fault-failure
-
-Problema	Caso	Solución
-Compu se rompe	Un servidor puede tener varios discos RAID y uno falla.	En ese caso el sistema puede seguir funcionando y reemplazar el disco defectuoso sin apagar el servidor (hot swap). Retira físicamente el disco averiado de su bahía y reemplázalo de inmediato por uno nuevo compatible. El sistema iniciará la reconstrucción (rebuild) de forma automática o manual sin apagar el equipo
-No sabe con quién comunicarse	El front no sabe permanentemente la ip donde se encuentra el back. 	Recurrir al uso de DNS (guía telefónica de IPs) o service registry para descubrir dónde está el servicio. 
-No se pone de acuerdo	No logran acordar entre nodos qué valor será el próximo en registrarse en la DB.	Raft y paxos se pueden utilizar para lograr el consenso distribuido.  
-Corte en comunicación	Una aplicación conectada a una VM de Azure pierde temporalmente la conexión de red con la VM. La VM continúa funcionando, pero el cliente no puede comunicarse con ella.	Esto se puede solucionar mediante timeouts, reintentos y mecanismos de reconexión/failover.
-Pierden bits	Por ejemplo, está tratando de descargar una imagen pero por ruido de la transmisión los bits llegan cambiados. 	Detección de errores más retransmisión directa como checksum, CRC, códigos de detección/corrección de errores. 
-		
-		FCS/CRC
-		Computadora A ─── Ethernet ───→ Computadora B
-		                         ↓
-		                    bit corrupto
-		                         ↓
-		                  CRC detecta error
-		O con tcp…
-		A ─── paquete ───→ B
-		        ❌ perdido
-		
-		A ←── "no llegó" ── B
-		A ─── retransmisión ──→ B
-		
-Intrusos	En canales no asegurados el atacantne puede posicionarse entre A y B haciéndolos creer que en verdad establecieron contacto. Intercambian las claves con el intruso. 	Aplicación de criptografía y autenticación. Principios de zero trust, autenticación continua, red fragmentada  y MFA. 
-Bugs	No actualizan correctamente el saldo de ceunta o no contemplan la concurrencia de la reserva. 	Tests unitarios y de integración teniendo siempre la posibilidad de hacer un rollback a una versión anterior. 
-
+6) Ejecución 1:
+    - Cliente --> servidor: pagar $10.000
+    - Servidor procesa el pago
+    - Servidor --> cliente: respuesta perdida
+    - Cliente espera --> timeout
+    
+   Ejecución 2:
+    Cliente --> servidor: pagar $10.000
+    Servidor procesa pago
