@@ -100,3 +100,81 @@ Hay una partición de la red, quedan aislados por pérdida de conectividad y tie
 fue procesada, si fue procesada pero la respuesta se perdió, o si simplemente el servidor está tardando. En cambio, una falla explícita permite conocer 
 que la operación falló y actuar en consecuencia.
 Si no sabe, puede decidir reiterar la operación y se ejecutaría dos veces (como el caso de el pago doble).
+
+**Nivel 3**: diseño y comparación
+
+11) Tabla:
+
+| Síntomas relevados | Causas posibles | Evidencias necesarias para distinguirlas |
+|---|---|---|
+| No hay mensaje de verificación | El pago llegó al servidor, pero el ACK no llegó al cliente | Revisar los logs del servidor para comprobar si recibió y procesó el pago, y los registros de comunicación para verificar si se envió el ACK |
+| No se reduce el saldo de la cuenta | El pago no fue procesado; el servidor no recibió la solicitud; o hubo una inconsistencia entre nodos | Consultar el estado del pago en el servidor y comparar el saldo/estado entre las réplicas |
+| La operación sigue en proceso (circulito girando) | El cliente no recibió la respuesta; el servidor está procesando la operación; o se perdió la conexión | Revisar los logs del servidor y del cliente, además del estado de la conexión, para determinar si la solicitud llegó y si fue procesada |
+
+12) 
+¿Qué se sabe?
+El cliente realizó una solicitud de pago.
+El cliente no recibió una respuesta dentro del tiempo esperado.
+Se produjo un timeout.
+El cliente, por lo tanto, no tiene confirmación de que el pago haya sido realizado.
+
+¿Qué se infiere?
+Puede haber ocurrido un problema de comunicación entre el cliente y el servidor.
+Es posible que el servidor haya recibido y procesado el pago pero que la respuesta se haya perdido.
+También es posible que el servidor no haya recibido la solicitud o que todavía esté procesándola.
+
+¿Qué todavía no puede afirmarse?
+No puede afirmarse que el servidor se haya caído.
+No puede afirmarse que el pago no se haya realizado.
+Tampoco puede afirmarse que el pago se haya realizado.
+No puede saberse únicamente a partir del timeout si se perdió la solicitud, la respuesta, o si el servidor simplemente tardó demasiado.
+
+Conclusión:
+Un timeout nos da información sobre lo que observó el cliente (no recibió respuesta a tiempo), pero no nos permite conocer directamente el estado real del servidor o de la operación.
+
+13) Propuesta de diseño
+
+Relevamiento:
+El principal problema detectado es que, ante un timeout, el cliente no puede saber si el pago fue procesado. Esto genera el riesgo de que realice un retry y el pago se ejecute dos veces, o de mostrar un saldo incorrecto.
+
+Garantía buscada:
+Garantizar que un pago no se procese más de una vez y que el saldo mostrado al usuario sea consistente con el estado confirmado de la operación.
+
+Solución elegida:
+Usar una operación idempotente, identificando cada pago con un identificador único. Si el cliente hace retry debido a un timeout, el servidor reconoce que se trata del mismo pago y no vuelve a ejecutarlo. Además, se puede confirmar la operación únicamente cuando el estado haya sido registrado de forma segura.
+
+Si además se prioriza consistencia del saldo,se puede hacer que el sistema no permita nuevas operaciones sobre ese saldo mientras exista una operación cuyo resultado todavía no esté confirmado.
+
+Trade-off aceptado:
+Se sacrifica disponibilidad y rapidez en determinadas situaciones: el usuario puede tener que esperar o no poder realizar otra operación mientras el estado del pago no esté confirmado. A cambio, se reduce el riesgo de inconsistencias o pagos duplicados.
+
+Por ejemplo:
+
+* Cliente genera payment_id = 123.
+* Cliente → servidor: Pagar $10.000, payment_id=123.
+* Servidor procesa el pago.
+* Servidor → cliente: ACK perdido.
+* Cliente recibe timeout.
+* Cliente hace retry con el mismo payment_id=123.
+* Servidor recibe payment_id=123, busca ese ID:
+* Si ya fue procesado → no vuelve a cobrar, devuelve el resultado anterior.
+* Si no fue procesado → lo procesa.
+
+Mientras el pago 123 esté en estado “pendiente de confirmación”, no permito iniciar otro pago diferente sobre esa cuenta. Si se puede reintentar la operación 123 porque está protegida por el UID.
+
+14) COMPRAS ONLINE
+P: problema --> pago remoto con timeout
+F: fallas asumidas --> pérdida de respuesta, delay, retry del cliente
+G: garantía requerida --> no más de un débito efectivo
+S: solución elegida --> request ID único + de-duplicación + persistencia del resultado 
+T: trade-off acpetado --> menor disponibilidad mientras no se pueda confirmar el estado del pago
+
+15) PLATAFORMA DE CHAT
+P: no se informa recepción
+F: no llegó el mensaje | pérdida de respuesta
+G: el mensaje debe llegar de A a B
+S: priorizar disponibilidad. Asilar ele stado de cada mensaje
+T: puede haber demoras en la actualización del estado de la entrega, pero el usuario puede seguir mensajeando con otros o con esta msima persona. 
+
+**Nivel 4**: integración y defensa
+
