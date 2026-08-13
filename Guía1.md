@@ -50,4 +50,53 @@ En un sistema distribuido, el cliente no puede determinar con certeza qué ocurr
     
    Ejecución 2:
     Cliente --> servidor: pagar $10.000
-    Servidor procesa pago
+    La solicitud nunca llega al srevido
+    Cliente espera --> time out
+
+Ambos casos para el cliente son pagar --> esperar --> timeout
+POr eso le resultan indistinguibles aunque lo que realmente suceda no es lo mismo. 
+Un timeout no me permite saber si el servidor se cayó o si ocurrió otra cosa en la comunicación
+
+7) 
+- Cliente --> servidor: pagar $10.000
+- Servidor procesa el pago
+- Servidor --> cliente: respuesta perdida
+- Cliente espera --> timeout
+- Cliente --> servidor: pagar $10.000
+- Servidor procesa el pago
+
+A continuación, puede seguir sin recibir notificación o finalmente recibir una. Pero no se dará ceunta que el pago se realizó dos veces.
+El nuevo riesgo es que el retry provoque la ejecución duplicada de una operación. En este caso, el primer pago puede haberse realizado correctamente, pero como la respuesta se perdió, el cliente no lo sabe y vuelve a enviar la solicitud. El servidor entonces procesa el pago nuevamente. Por lo tanto, un timeout seguido de un retry puede generar duplicación del pago.
+RIESGO: DUPLICAR LA OPERACIÓN
+
+8) Podría involucrar una caída de nodo o bien una pérdad de consistencia. 
+   Cliente → Servidor: Enviar mensaje "Hola"
+   Servidor recibe y guarda/procesa el mensaje.
+   Servidor → Cliente: ACKnowledge / mensaje entregado
+   La respuesta se pierde por un problema de red.
+   Cliente no recibe el ACK y muestra "No entregado".
+
+En tal caso, para el **servidor** el mensaje fue procesado, pero para el **cliente** el mensaje aparece como no entregado.
+
+Si fuera el caso de una caída de nodo:
+
+   Cliente envía mensaje.
+   Nodo A recibe y procesa el mensaje.
+   Nodo A replica el mensaje a Nodo B.
+   Antes de enviar la confirmación al cliente, Nodo A se cae.
+   El cliente no recibe la confirmación y muestra "no entregado".
+
+9) En este caso ningún nodo se cae sino que todo siguen funcionando correctamente, pero dejan de poder comunicarse entre sí:
+
+   - Nodo a recibe una actualización, saldo = 10.000
+   - A intenta enviar la actualización a B
+   - Se corta la conexión entre A y B
+   - A y B siguen funcionando, pero no pueden comunicarse
+   - A se qeueda con saldo 10.000
+   - B sigue con el dato de 5.000
+Hay una partición de la red, quedan aislados por pérdida de conectividad y tienen información diferente (lo que termina generando pérdida de consistencia).
+
+10) Una respuesta tardía es más difícil de manejar porque genera incertidumbre sobre el estado de la operación. El cliente no puede saber si la solicitud no 
+fue procesada, si fue procesada pero la respuesta se perdió, o si simplemente el servidor está tardando. En cambio, una falla explícita permite conocer 
+que la operación falló y actuar en consecuencia.
+Si no sabe, puede decidir reiterar la operación y se ejecutaría dos veces (como el caso de el pago doble).
