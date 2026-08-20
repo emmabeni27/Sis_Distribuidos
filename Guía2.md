@@ -191,7 +191,7 @@ Al refrescar, el navegador hace un GET /posts — pide leer el estado actual. Es
 
 **Nivel 3**: diseño y comparación
 
-1) ⛔ contaría el ejemplo de el push interrumpido?
+1) ⛔ contaría el ejemplo de el push interrumpido? push lleva tiempo, no es atómico. primer byte puede llegar, el segundo no.s i tarda tiempo, en el medio se va caer
 * El wifi se corta a mitad de la transferencia de objetos. El servidor detecta la conexión rota (no espera nada, se entera al instante porque el socket falla).
 * git push está diseñado para que la actualización de la referencia remota (el branch) sea el último paso, todo-o-nada: si la transferencia no se completó, el servidor simplemente descarta los objetos parciales que recibió y nunca toca el branch. No hay un "medio commit" ni un estado a medio camino.
 * El cliente recibe un error explícito casi de inmediato — algo como fatal: the remote end hung up unexpectedly o error: RPC failed; curl transfer closed. No hubo timeout: la falla se detectó por una señal de red real (conexión rota), no por silencio prolongado.
@@ -247,7 +247,7 @@ Dado que el cliente no puede distinguir los tres casos, tiene solo dos opciones:
 
 Formalmente, esto define la semántica del retry como "at-least-once": la operación se ejecuta como mínimo una vez, pero puede ejecutarse más de una vez, nunca menos. La única forma de tener "exactly-once" real requeriría una señal de confirmación con cero probabilidad de pérdida — lo cual, dado el mismo argumento del canal no confiable aplicado recursivamente a esa señal, es imposible en general (la confirmación de la confirmación también podría perderse).
 
-5) Un reintento puede ser tanto automático como manual. ⛔
+5) Un reintento puede ser tanto automático como manual. ⛔ sistema sugireiendo al usuario que lo haga de buelta si automatico hacer transparente para el usuario. avisa que no puede que no sale solo no sabe que pase, volve a mandar
 + Usuario agrega el producto X al carrito
 + Se envía la solicitud al servidor
 + El servidor ya procesó el alta (X quedó registrado), pero la respuesta todavía no llegó
@@ -295,7 +295,7 @@ At least once: Un pago con tarjeta de crédito en línea. Si la red falla
 después de enviar la solicitud, el sistema reintenta para asegurarse
 de que el pago se procese, pero puede producirse un doble cargo.
 
-At most once: El envío de métricas de rendimiento (por ejemplo, uso
+At most once: El envío de métricas de rendimiento (por ejemplo, uso 0 o 1 vez, no mando de nuevo. 
 de CPU). Si un paquete se pierde, no se reintenta porque es preferible
 perder una métrica antes que generar tráfico o duplicados.
 Streaming? ⛔
@@ -306,3 +306,8 @@ que la transferencia ya fue procesada y evita ejecutarla nuevamente.
 5) Garantizar el procesamiento "exactamente una vez" (exactly-once) es muy difícil en sistemas distribuidos porque la red es poco confiable, los servidores pueden fallar en cualquier momento y la pérdida de confirmaciones (acks) obliga a reintentar operaciones, lo que genera duplicados inevitables.
 
 ![img_5.png](img_5.png)
+
+Stereming: dudoso, buscar más ejemplos. At most once manda una vez te llega o no pero no reintenta. 1 o 0. 
+Push interrumpido puede contar. Tarda el proceso, no puede ser atómico. Desde que hay un timepo de transferencia de bytes, puede fallar. 
+El retry puede ser atuomático. Pero también manual por el usuario. pero el sistema lo tiene que tener actualizado de lo que está pasando. Decirle "no se pudo", " no puedo reintentar", " te sugiero volver a probar". Y ahí sería un retry manueal que cuenta
+RPC --> lo vemos hoy
