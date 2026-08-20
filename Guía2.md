@@ -186,3 +186,75 @@ Crash (Incontrolado):
 ![img_3.png](img_3.png)
 La petición que hizo timeout fue un POST /posts — pedía escribir algo, y su respuesta se perdió después de que el servidor ya había hecho el commit en la base de datos.
 Al refrescar, el navegador hace un GET /posts — pide leer el estado actual. Esa petición no tiene ninguna relación con el POST anterior: es una conexión nueva, sin memoria de que hubo un timeout antes.
+
+**Nivel 3**: diseño y comparación
+
+1) ⛔ contaría el ejemplo de el push interrumpido?
+* El wifi se corta a mitad de la transferencia de objetos. El servidor detecta la conexión rota (no espera nada, se entera al instante porque el socket falla).
+* git push está diseñado para que la actualización de la referencia remota (el branch) sea el último paso, todo-o-nada: si la transferencia no se completó, el servidor simplemente descarta los objetos parciales que recibió y nunca toca el branch. No hay un "medio commit" ni un estado a medio camino.
+* El cliente recibe un error explícito casi de inmediato — algo como fatal: the remote end hung up unexpectedly o error: RPC failed; curl transfer closed. No hubo timeout: la falla se detectó por una señal de red real (conexión rota), no por silencio prolongado.
+* Y lo más importante: acá el cliente sí sabe con certeza que la operación falló, porque el estado remoto (el branch sin cambios) coincide exactamente con lo que el error sugiere. No hace falta "consultar" nada para despejar dudas — a diferencia del caso SSH o del blog, esta vez no hay ambigüedad que resolver.
+
+Dos personas entran a comprar entradas para el mismo show al mismo tiempo, y a las dos les queda un solo asiento disponible en pantalla — el mismo asiento, porque ambas páginas se cargaron con datos casi simultáneos.
+
+Las dos apretan "confirmar" casi al mismo instante.
+El servidor recibe ambas solicitudes, pero las procesa una por una: una llega primero (por una diferencia de milisegundos) y el asiento se marca como ocupado a tu nombre.
+Cuando llega la solicitud de la otra persona, el servidor chequea "¿este asiento sigue libre?" y la respuesta es no. Le devuelve un error inmediato: "este asiento ya no está disponible".
+
+2) El sentido de la longitud de un timeout se lo da la duración del erquest correspondiente. 
+https://codescoddler.medium.com/how-do-you-choose-the-right-timeout-1ed402847f79
+TIMEOUT CORTO:
+:) Libera recursos de inmediato, detecta ráidamente los fallos y mejora seguridad al cerrar sesiones inactivas
+:( Puede cortar procesos legítimos si la red o el servidor están lentos
+
+Conviene usarlo en sistemas de tiempo real, interfaces de usuario interactivas o conexiones internas estables y rápidas
+
+Tiempo real --> no me sirve que llegue más tarde
+Interfaz usuario --> entorpece la experiencia
+Conexión interna estable --> servidores datacenter, la conexión es de 5ms. Si va por 2 s, algo raro pasó. 
+
+TIMEOUT LARGO:
+:) Evita errores por demoras temporales de red y permite terminar tareas pesadas o complejas.
+:( Hace que los usuarios esperen mucho tiempo si hay un fallo real y acumula conexiones colgadas consumiendo memoria o recursos del servidor.
+
+En conexiones móviles inestables, subidas/descargas de archivos grandes o consultas lentas a bases de datos
+
+3) Un retry es un reintento de la operación tras un timeout. Reintenta igual, aunque no se sepa si la ejecución ocurrio. 
+El obejetivo es superar fallos temporales en sistemas informáticos al volver a ejecutar una operación que falló. 
+Logra así:
++ recuperación rápida
++ menos errores visibles
++ mayor estabilidad
+
+4) Sea una operación con dos eventos posibles en el servidor:
+
+* E: la ejecución de la operación (efecto secundario aplicado).
+* R: la respuesta enviada de vuelta al cliente.
+
+Y sea A: el cliente recibe la respuesta.
+
+El camino "feliz" es la secuencia E → R → A. Pero como el canal puede fallar en cualquier tramo, hay tres puntos de corte posibles:
+
+* Corte antes de E: la solicitud se pierde. E nunca ocurre.
+* Corte entre E y R: E ocurre, pero R no se genera o no sale.
+* Corte entre R y A: E y R ocurren, pero A nunca pasa (el caso de la transferencia bancaria y del blog que vimos antes).
+
+Desde la perspectiva del cliente, los tres cortes son observacionalmente idénticos: en los tres casos, el cliente simplemente no recibe respuesta y su timeout vence. No existe ninguna señal disponible en el cliente que le permita distinguir en cuál de los tres estuvo.
+
+Dado que el cliente no puede distinguir los tres casos, tiene solo dos opciones: no reintentar (arriesgando dejar sin completar una operación que en realidad falló en el corte 1) o reintentar (arriesgando repetir una operación que en realidad ya ocurrió, corte 3). La mayoría de los sistemas eligen reintentar, porque estadísticamente el corte 1 y 2 (fallo real) son más comunes que el corte 3 (fallo de confirmación) — pero elegir reintentar es, por construcción, aceptar la posibilidad del corte 3 como costo.
+
+Formalmente, esto define la semántica del retry como "at-least-once": la operación se ejecuta como mínimo una vez, pero puede ejecutarse más de una vez, nunca menos. La única forma de tener "exactly-once" real requeriría una señal de confirmación con cero probabilidad de pérdida — lo cual, dado el mismo argumento del canal no confiable aplicado recursivamente a esa señal, es imposible en general (la confirmación de la confirmación también podría perderse).
+
+5) Un reintento puede ser tanto automático como manual. ⛔
++ Usuario agrega el producto X al carrito
++ Se envía la solicitud al servidor
++ El servidor ya procesó el alta (X quedó registrado), pero la respuesta todavía no llegó
++ La UI no se actualiza (sigue mostrando el carrito sin X) ⛔
++ El usuario, sin feedback, asume que falló y vuelve a apretar "agregar" sobre el mismo producto X (retry manual)
++ Esa segunda solicitud también se procesa: el servidor no tiene forma de saber que es un reintento de la misma acción
++ Llegan (tarde) las dos respuestas / se refresca la pantalla
++ El usuario ve X duplicado (cantidad 2, o dos líneas) en el carrito
+
+**Nivel 4**: integración y defensa
+1) https://www.geeksforgeeks.org/system-design/retries-strategies-in-distributed-systems/
+El exceso de retries
