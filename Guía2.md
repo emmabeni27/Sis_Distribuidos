@@ -66,4 +66,56 @@ Remota: aparecen categorías de error que no existen localmente — timeout, con
 * Envío de respuesta
 * Recepción en cliente
 
-Cada una de las etapas puede fallas independienemente
+Cada una de las etapas puede fallar independienemente
+
+4) Antes del timeout:
+* El cliente envía la solicitud, el servidor la recibe y comienza a procesar. 
+* Si no llega respuesta a tiempo, el cliente reintenta; para el servidor ese reintento es una posible solicitud duplicada.  (no sabe si la primera se eprdió o sigue en curso o terminó)
+* Cuadno se alcanza/vence el timeout para el cliente, este considera que la lalmada falló y sigue su lógica (error, fallback, reintento) pero no sabe que hace el servidor.
+
+Cuando el cleitne ya dejó de esperar:
+* El servidor quizás sigue ejecutando y termina la operación igual. NO sabe que el cleinte ya dejó de esperar. 
+* Envía rta que llega tarde. Si el cleinte ya no está esperando, la rta se descarta o pierde. 
+
+Riesgos:
+* Duplicación
+* Desperdicio de trabajo (completa resutlado de una tarea que ya nadie va a usar)
+
+Esto ilustra dos riesgos clásicos de las llamadas remotas con timeout: duplicación (si la operación no es idempotente, procesar el reintento puede ejecutar la acción dos veces) y desperdicio de trabajo (el servidor completa una tarea cuyo resultado nadie va a usar). Por eso en sistemas reales se suelen usar identificadores de solicitud (idempotency keys) y cancelación cooperativa para mitigar ambos problemas
+![img_1.png](img_1.png)
+
+5) Modelo una llamada de un cliente a un servidor remoto sobre una conexión TCP, recorriendo las capas que participan cuando algo falla — desde la aplicación hasta el cableado físico.
+
+Aplicación (cliente RPC/HTTP y su lógica de timeout)
+
+Respuesta ante la falla: si no llega respuesta dentro del timeout configurado, el cliente da la llamada por perdida, cierra o abandona la espera del socket, y puede reintentar o propagar un error hacia arriba.
+Ayuda al diagnóstico: es la capa donde el usuario final nota el problema, y suele registrar contexto útil (qué operación, con qué parámetros, cuánto tardó).
+Complica el diagnóstico: el timeout es un límite arbitrario elegido por el desarrollador, no una señal de red real. Un timeout corto puede reportar "falla" cuando en realidad la respuesta solo iba lenta, mezclando "no funcionó" con "tardó más de lo esperado".
+
+Transporte (TCP)
+
+Respuesta ante la falla: TCP reintenta retransmitir segmentos no confirmados con backoff exponencial: si no recibe ACK tras varios intentos, termina la conexión (RST) o la deja expirar.
+Ayuda al diagnóstico: separa "el paquete se perdió una vez" (TCP lo repara solo, invisible para la aplicación) de "la conexión está realmente rota" (TCP se rinde y notifica un error de socket).
+Complica el diagnóstico: los reintentos de TCP sonocultos para la aplicación, así que un problema de red intermitente puede parecer "todo funciona lento" en vez de mostrarse como errores concretos, y el tiempo que TCP gasta reintentando se suma silenciosamente al timeout de la aplicación.
+
+Red (IP y enrutamiento)
+
+Respuesta ante la falla: si un router no puede reenviar un paquete (destino inalcanzable, TTL agotado), puede responder con un mensaje ICMP; si no, simplemente descarta el paquete sin avisar a nadie.
+Ayuda al diagnóstico: ICMP (cuando llega) da una pista concreta del punto de fallo en la ruta (herramientas como traceroute se apoyan en esto).
+Complica el diagnóstico: muchos firewalls bloquean ICMP por seguridad, así que en la práctica el paquete simplemente desaparece — no hay ninguna señal explícita, solo silencio, y hay que inferir la pérdida indirectamente.
+
+Enlace de datos (Ethernet / Wi-Fi)
+
+Respuesta ante la falla: en Ethernet cableado, errores de trama se detectan por checksum y el frame se descarta; en Wi-Fi hay reintentos a nivel de enlace antes de darle el paquete a IP.
+Ayuda al diagnóstico: los contadores de errores de la interfaz de red (CRC errors, colisiones, frames descartados) permiten distinguir un problema de cableado/interferencia de un problema más arriba en la pila.
+Complica el diagnóstico: estos contadores rara vez son visibles para quien diagnostica el problema desde la aplicación; hace falta acceso a la infraestructura de red o al switch para verlos.
+
+Física (cableado, señal, hardware de red)
+
+Respuesta ante la falla: no hay "respuesta" lógica — un cable cortado, una interfaz caída o una señal degradada simplemente deja de transmitir bits, y esto suele reflejarse como la interfaz cayendo (link down).
+Ayuda al diagnóstico: cuando existe, el evento de "link down" es una señal muy clara y binaria (o hay conexión física o no la hay).
+Complica el diagnóstico: los fallos intermitentes o parciales (cable con mal contacto, interferencia) no siempre generan un evento claro, y desde las capas superiores esto se ve idéntico a cualquier otra pérdida de paquetes.
+
+El patrón general: cada capa hacia abajo tiene menos contexto sobre "qué" se estaba haciendo pero información más precisa sobre "dónde" ocurrió el problema físico; cada capa hacia arriba tiene más contexto de negocio pero ve el fallo ya filtrado (o directamente oculto) por los reintentos de las capas inferiores. Por eso diagnosticar un timeout intermitente casi nunca se resuelve mirando una sola capa — típicamente hace falta correlacionar logs de aplicación, estadísticas de TCP (retransmisiones, RTT) y contadores de la interfaz de red para saber si el problema es de código, de congestión, o físico.
+
+**Nivel 2**: jjecuciones y fallas
