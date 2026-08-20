@@ -123,6 +123,8 @@ El patrón general: cada capa hacia abajo tiene menos contexto sobre "qué" se e
 1) ⛔ La red rompe la transparencia de las RPC porque la comunicación local y la comunicación por red tienen diferencias físicas inevitables.
 La latencia de la red es alta, los paquetes se pierden y las computadoras independeintes pueden fallar por separado. 
 
+Un RPC (Remote Procedure Call o Llamada a Procedimiento Remoto) es un protocolo de comunicación que permite a un programa ejecutar una función o rutina en otra computadora o nodo de la red como si fuera local.
+
 **Latencia y rendimiento:**
 + Funcion local --> nanosegundos, red --> milisegundos
 + Uso de la red cambia el tiempo de respuesta total del sistema radicalmente. 
