@@ -256,5 +256,51 @@ Formalmente, esto define la semántica del retry como "at-least-once": la operac
 + El usuario ve X duplicado (cantidad 2, o dos líneas) en el carrito
 
 **Nivel 4**: integración y defensa
+
 1) https://www.geeksforgeeks.org/system-design/retries-strategies-in-distributed-systems/
-El exceso de retries
+El exceso de retries sin control sobrecarga y satura los servidores con tráfico duplicado, lo que genera una "retry storm".
+Eleva la altencia, agota los recursos de CPU y memoria y puede causar la caída total o el bloqueo en cadena de servicios dependientes. 
+
+Impacto en el sistema:
++ Sobrecarga de tráfico: Multiplica el volumen de peticiones enviadas al servidor que ya presenta fallas.
++ Agotamiento de recursos: Consume conexiones de bases de datos, hilos de ejecución y memoria RAM.
++ Mayor latencia: Retrasa las respuestas válidas y acumula tiempo de espera (timeout) en toda la cadena.
++ Efecto cascada: Propaga el fallo inicial a otros microservicios conectados
+
+*Una tormenta de reintentos (retry storm) ocurre cuando un servicio falla o se vuelve lento, y los clientes reintentan enviar sus peticiones de forma masiva. Esta avalancha multiplica el tráfico y satura aún más el servidor, lo que impide que se recupere y puede causar una caída total del sistema.
+https://twitter.github.io/finagle/guide/Glossary.html
+
+2) ![img_6.png](img_6.png)
+https://www.hillelwayne.com/post/safety-and-liveness/
+
+Safety = que no ocurra algo incorrecto
+Liveness = que la operación eventualmente avance
+
+|              | **Sin retry**                                                                | **Con retry**                                                                                |
+| ------------ | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| **Liveness** | ↓ Menor. Si falla una comunicación, la operación puede quedar sin completar. | ↑ Mayor. Si falla una comunicación temporalmente, se vuelve a intentar.                      |
+| **Safety**   | ↑ Mayor en cuanto a duplicaciones. No se ejecuta nuevamente por un retry.    | ↓ Puede disminuir porque una operación puede ejecutarse varias veces si no hay idempotencia. |
+
+
+3)
+At least once: el sistema reintenta hasta obtener respuesta. Mejora liveness pero genera múltiples ejecuciones. 
+At most once: evita la duplicación pero puede perder la ejecución
+Exactly once: requiere coordinación fuerte o se implementa como combinación de at least once + idempotencia
+
+
+4) 
+At least once: Un pago con tarjeta de crédito en línea. Si la red falla
+después de enviar la solicitud, el sistema reintenta para asegurarse
+de que el pago se procese, pero puede producirse un doble cargo.
+
+At most once: El envío de métricas de rendimiento (por ejemplo, uso
+de CPU). Si un paquete se pierde, no se reintenta porque es preferible
+perder una métrica antes que generar tráfico o duplicados.
+Streaming? ⛔
+
+Exactly once: Una transferencia bancaria identificada con un ID único.
+Aunque el cliente reintente por un fallo de red, el servidor detecta
+que la transferencia ya fue procesada y evita ejecutarla nuevamente.
+5) Garantizar el procesamiento "exactamente una vez" (exactly-once) es muy difícil en sistemas distribuidos porque la red es poco confiable, los servidores pueden fallar en cualquier momento y la pérdida de confirmaciones (acks) obliga a reintentar operaciones, lo que genera duplicados inevitables.
+
+![img_5.png](img_5.png)
