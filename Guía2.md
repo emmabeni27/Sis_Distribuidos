@@ -118,4 +118,71 @@ Complica el diagnóstico: los fallos intermitentes o parciales (cable con mal co
 
 El patrón general: cada capa hacia abajo tiene menos contexto sobre "qué" se estaba haciendo pero información más precisa sobre "dónde" ocurrió el problema físico; cada capa hacia arriba tiene más contexto de negocio pero ve el fallo ya filtrado (o directamente oculto) por los reintentos de las capas inferiores. Por eso diagnosticar un timeout intermitente casi nunca se resuelve mirando una sola capa — típicamente hace falta correlacionar logs de aplicación, estadísticas de TCP (retransmisiones, RTT) y contadores de la interfaz de red para saber si el problema es de código, de congestión, o físico.
 
-**Nivel 2**: jjecuciones y fallas
+**Nivel 2**: ejecuciones y fallas
+
+1) ⛔ La red rompe la transparencia de las RPC porque la comunicación local y la comunicación por red tienen diferencias físicas inevitables.
+La latencia de la red es alta, los paquetes se pierden y las computadoras independeintes pueden fallar por separado. 
+
+**Latencia y rendimiento:**
++ Funcion local --> nanosegundos, red --> milisegundos
++ Uso de la red cambia el tiempo de respuesta total del sistema radicalmente. 
+
+**Fallos parciales:**
++ Si trabajo en una sóla máquina, el programa falla y se detiene todo.
++ En la red, una máquina puede morir y las otras siguen funcionando
++ El clietne no sabe si la orden llegó al servidor antes del corte de conexión
+
+**Acceso a memoria compartida:**
++ Las funciones locales pueden pasar datos usando apuntadores o referencias de memoria.
++ La red exige empaquetar y desempaquetar los datos (marshalling) porque las máquinas no comparten memoria física.
+
+**Concurrencia y estado:**
++ Conexiones de red sufren retrasos y reordenamiento de paquetes. 
++ Gestionar estados compoartidos por medio de WI-FI o cables es más complejo que tratando dentro de un mismo sistema operativo
+
+2) ![img_2.png](img_2.png)
+
+El caso concreto: el cliente pide transferir 500 de la cuenta A a la cuenta B. El servidor valida el saldo, confirma el débito en su base de datos —la operación ya es un hecho, el dinero salió de la cuenta A— y genera la respuesta de éxito. Pero esa respuesta se pierde en la red (un router la descarta, la conexión se cae, el proceso del cliente muere justo antes de leerla) y nunca llega. El cliente, al agotar su timeout, no tiene ningún dato: desde su punto de vista, la llamada "falló", pero en realidad la operación se ejecutó por completo.
+
+Lo importante es que el fallo ocurrió después del punto de no retorno. La ejecución y el envío de la respuesta son dos eventos separados por la red, y cualquier cosa puede fallar entre uno y otro sin que el resultado de la operación cambie.
+
+Con esa información, el cliente queda frente a tres posibilidades indistinguibles entre sí:
+
+La solicitud nunca llegó al servidor → no se ejecutó nada.
+Llegó, pero el servidor falló antes de completar el débito → no se ejecutó nada.
+Se ejecutó y confirmó, pero la respuesta se perdió → sí se ejecutó (este caso).
+
+Esto es exactamente lo que hace peligroso reintentar a ciegas: si el cliente reintenta pensando en el caso 1 o 2, pero en realidad estaba en el caso 3, se debita la cuenta A por segunda vez. En sistemas reales esto se resuelve de dos formas complementarias:
+
+Idempotency key: el cliente genera un identificador único por intento lógico de transferencia (no por reintento), y el servidor lo guarda junto con el resultado. Si llega dos veces la misma clave, devuelve el resultado ya calculado en vez de ejecutar de nuevo.
+Consulta de estado: en vez de reintentar la operación directamente, el cliente pregunta "¿qué pasó con la transferencia X?" antes de decidir si reintentar, cerrando la ambigüedad sin arriesgar un doble débito.
+
+3) Un timeout (tiempo de espera máximo) es un límite de tiempo fijado para una operación de red o comunicación. Si un nodo o servicio no responde antes de ese plazo, el sistema cancela la acción de forma automática para evitar bloqueos y liberar recursos.
+Entonces:
++ Evita bloqueos infinitos
++ Libera recursos
++ Aísla fallos
+
+Problemas comunes:
++ Falsos positivos (se puede dar una tarea por perdida cuadno sólo estaba demorada)
++ Si los tiempos no están bien medidos entre microservisios, el retraso se multiplica y empeora el servicio
+
+https://harish-bhattbhatt.medium.com/timeout-in-a-distributed-system-microservices-4fa36c611850
+
+4) Un timeout (se agota el teimpo de espera) ocurre cuando una operación tarda más de lo previsto en responder. 
+No implica crash (cierre o fallo abrupto del programa) porque el sisetma detecta la demora a tiempo, detiene esa tarea de forma controlada, segura y continua sin rompoerse.
+
+Timeout (Controlado):
+* El programa pone un reloj o límite de tiempo (por ejemplo, 5 segundos).
+* Si pasa el tiempo, salta una alerta o excepción planeada (TimeoutException).
+* El código atrapa el error, libera los recursos y sigue vivo.
+
+Crash (Incontrolado):
+* Ocurre un error grave no previsto (como dividir por cero o leer memoria dañada).
+* El sistema operativo mata el proceso de forma abrupta.
+* La aplicación se apaga o se cierra sola por completo
+
+5) 
+![img_3.png](img_3.png)
+La petición que hizo timeout fue un POST /posts — pedía escribir algo, y su respuesta se perdió después de que el servidor ya había hecho el commit en la base de datos.
+Al refrescar, el navegador hace un GET /posts — pide leer el estado actual. Esa petición no tiene ninguna relación con el POST anterior: es una conexión nueva, sin memoria de que hubo un timeout antes.
