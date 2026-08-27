@@ -25,7 +25,9 @@ Puede diferir entre las réplicas
 Estado lógico: estado que el sistema considera que represetna correctamente los datos, independeintementee de cómo estén distribuídos físicamente
 Si el sistema detecta una escritura concurrente entre x=1 y x=2 pude considerar:
 
-```Estado lógico --> x tiene un conflicto entre 1 y 2 ```
+```Estado lógico --> x tiene un conflicto entre 1 y 2 ``` 
+
+El estado lógico surge de la comparación entre varios nodos para ver cuál tiene la posta. No es que hay un lugar con la fuente de verdad. (algo así)
 
 y posteriormente resolverlo, mediante Last Write Wins como:
 
@@ -154,4 +156,11 @@ Entonces, al leer 2 réplicas, al menos una debería ser una de las que recibió
 | **Multi-leader** | Varios líderes | **Conflictos concurrentes**                | Puede observarse divergencia entre réplicas                      |
 | **Leaderless**   | Cualquier nodo | Elegir `N`, `W`, `R` y resolver conflictos | Quórums pueden garantizar que lectura y escritura se intersecten |
 
-##Nivel 4: integracipon y defensa
+## Nivel 4: integración y defensa
+
+1) N = 3
+W = 2
+R=2
+2+2 > 3
+
+Al leer dos réplicas, al menos una debería ser una de las que recibió escritura. 
