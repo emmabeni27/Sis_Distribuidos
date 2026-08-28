@@ -164,3 +164,49 @@ R=2
 2+2 > 3
 
 Al leer dos réplicas, al menos una debería ser una de las que recibió escritura. 
+
+2) Lectura fresca: Si acabás de cambiar algo y después lo consultás, esperás ver el cambio
+
+N = 3
+W = 1
+R = 2
+-------
+R + W = 3 ≤ 3 = N y lo que se requiere en realidad es R+W > N, no >=
+-------
+R1 = 0
+R2 = 0
+R3 = 0
+-------
+Hacemos WRITE(x=1). Como W=1, alcanza con que R1 reciba la escritura:
+
+R1 = 1
+R2 = 0
+R3 = 0
+-------
+Luego hacemos READ(x) y se consultan R2 y R3:
+
+R2 → 0
+R3 → 0
+
+La lectura devuelve 0, aunque ya se había confirmado x=1.
+
+Por lo tanto, la lectura no es fresca. Esto ocurre porque el conjunto de réplicas de la escritura {R1} y el de la lectura {R2,R3} no se intersectan.
+
+3) Conflicto concurrente: evento que ocurre cunado dos réplicas realizan escrituras diferentes sobre el mismo dato sin que una haya conocido la otra. 
+
+Estado inicial: x = 0
+
+R1: WRITE(x = 1)
+R2: WRITE(x = 2)
+------
+Se generan dos escrituras concurrentes:
+R1 → x = 1
+R2 → x = 2
+-------
+Ninguna réplica sabía de la escritura de la otra. Por lo tanto, al sincronizarse aparece un conflicto:
+
+¿x = 1 o x = 2?
+
+El sistema necesita algún mecanismo para resolverlo.
+
+4) 
