@@ -209,4 +209,12 @@ Ninguna réplica sabía de la escritura de la otra. Por lo tanto, al sincronizar
 
 El sistema necesita algún mecanismo para resolverlo.
 
-4) 
+4) Last Write Wins es una estrategia de resolución de conflictos que conserva la escritura que tenga el tiemsetam más reciente. 
+Riesgo: los timestamps pueden no representar correctamente el orden real de los eventos debido a que los relojes físicos de los nodos pueden estar desincronizados. Además, una escritura válida puede perderse simplemente porque tiene un timestamp menor.
+LWW es simple, pero puede descartar actualizaciones legítimas y depende de timestamps confiables.
+
+![img_12.png](img_12.png)
+
+5) Los vector clocks asignan un contador a cada proceso/réplica. El vector permite saber qué eventos conoce cada réplica.
+![img_13.png](img_13.png)
+![img_14.png](img_14.png)
