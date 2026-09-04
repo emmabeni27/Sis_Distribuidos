@@ -82,7 +82,7 @@ Riesgos:
 * Desperdicio de trabajo (completa resutlado de una tarea que ya nadie va a usar)
 
 Esto ilustra dos riesgos clásicos de las llamadas remotas con timeout: duplicación (si la operación no es idempotente, procesar el reintento puede ejecutar la acción dos veces) y desperdicio de trabajo (el servidor completa una tarea cuyo resultado nadie va a usar). Por eso en sistemas reales se suelen usar identificadores de solicitud (idempotency keys) y cancelación cooperativa para mitigar ambos problemas
-![img_1.png](img_1.png)
+![img_1.png](images/img_1.png)
 
 5) Modelo una llamada de un cliente a un servidor remoto sobre una conexión TCP, recorriendo las capas que participan cuando algo falla — desde la aplicación hasta el cableado físico.
 
@@ -142,7 +142,7 @@ Un RPC (Remote Procedure Call o Llamada a Procedimiento Remoto) es un protocolo 
 + Conexiones de red sufren retrasos y reordenamiento de paquetes. 
 + Gestionar estados compoartidos por medio de WI-FI o cables es más complejo que tratando dentro de un mismo sistema operativo
 
-2) ![img_2.png](img_2.png)
+2) ![img_2.png](images/img_2.png)
 
 El caso concreto: el cliente pide transferir 500 de la cuenta A a la cuenta B. El servidor valida el saldo, confirma el débito en su base de datos —la operación ya es un hecho, el dinero salió de la cuenta A— y genera la respuesta de éxito. Pero esa respuesta se pierde en la red (un router la descarta, la conexión se cae, el proceso del cliente muere justo antes de leerla) y nunca llega. El cliente, al agotar su timeout, no tiene ningún dato: desde su punto de vista, la llamada "falló", pero en realidad la operación se ejecutó por completo.
 
@@ -185,7 +185,7 @@ Crash (Incontrolado):
 * La aplicación se apaga o se cierra sola por completo
 
 5) 
-![img_3.png](img_3.png)
+![img_3.png](images/img_3.png)
 La petición que hizo timeout fue un POST /posts — pedía escribir algo, y su respuesta se perdió después de que el servidor ya había hecho el commit en la base de datos.
 Al refrescar, el navegador hace un GET /posts — pide leer el estado actual. Esa petición no tiene ninguna relación con el POST anterior: es una conexión nueva, sin memoria de que hubo un timeout antes.
 
@@ -272,7 +272,7 @@ Impacto en el sistema:
 *Una tormenta de reintentos (retry storm) ocurre cuando un servicio falla o se vuelve lento, y los clientes reintentan enviar sus peticiones de forma masiva. Esta avalancha multiplica el tráfico y satura aún más el servidor, lo que impide que se recupere y puede causar una caída total del sistema.
 https://twitter.github.io/finagle/guide/Glossary.html
 
-2) ![img_6.png](img_6.png)
+2) ![img_6.png](images/img_6.png)
 https://www.hillelwayne.com/post/safety-and-liveness/
 
 Safety = que no ocurra algo incorrecto
@@ -305,7 +305,7 @@ Aunque el cliente reintente por un fallo de red, el servidor detecta
 que la transferencia ya fue procesada y evita ejecutarla nuevamente.
 5) Garantizar el procesamiento "exactamente una vez" (exactly-once) es muy difícil en sistemas distribuidos porque la red es poco confiable, los servidores pueden fallar en cualquier momento y la pérdida de confirmaciones (acks) obliga a reintentar operaciones, lo que genera duplicados inevitables.
 
-![img_5.png](img_5.png)
+![img_5.png](images/img_5.png)
 
 Stereming: dudoso, buscar más ejemplos. At most once manda una vez te llega o no pero no reintenta. 1 o 0. 
 Push interrumpido puede contar. Tarda el proceso, no puede ser atómico. Desde que hay un timepo de transferencia de bytes, puede fallar. 

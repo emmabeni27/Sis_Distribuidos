@@ -91,10 +91,10 @@ A: evento E1 → timestamp 10:00:05
        ↓
 B: evento E2 → timestamp 10:00:00
 
-4) ![img_7.png](img_7.png)
-![img_8.png](img_8.png)
-![img_9.png](img_9.png)
-![img_10.png](img_10.png)
+4) ![img_7.png](images/img_7.png)
+![img_8.png](images/img_8.png)
+![img_9.png](images/img_9.png)
+![img_10.png](images/img_10.png)
 
 5) Linearizabilidad respeta el tiempo real mientras que consistencia causal espeta solamente las relaciones de causa --> efecto
 
@@ -143,7 +143,7 @@ En la forma *asíncrona* el líder responde antes que todas las réplicas tengan
 
 5) LEaderless (dynamo):
 
-![img_11.png](img_11.png)
+![img_11.png](images/img_11.png)
 
 Entonces, al leer 2 réplicas, al menos una debería ser una de las que recibió la escritura.
 
@@ -213,8 +213,8 @@ El sistema necesita algún mecanismo para resolverlo.
 Riesgo: los timestamps pueden no representar correctamente el orden real de los eventos debido a que los relojes físicos de los nodos pueden estar desincronizados. Además, una escritura válida puede perderse simplemente porque tiene un timestamp menor.
 LWW es simple, pero puede descartar actualizaciones legítimas y depende de timestamps confiables.
 
-![img_12.png](img_12.png)
+![img_12.png](images/img_12.png)
 
 5) Los vector clocks asignan un contador a cada proceso/réplica. El vector permite saber qué eventos conoce cada réplica.
-![img_13.png](img_13.png)
-![img_14.png](img_14.png)
+![img_13.png](images/img_13.png)
+![img_14.png](images/img_14.png)
