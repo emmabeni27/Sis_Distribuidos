@@ -651,3 +651,243 @@ COMMIT                   COMMIT
 SI detecta los WW, la clave está en construir un caso donde cada trnsacción escriba algo distinto pero las dos juntas rompan una regla.
 
 Para diferenciar Snapshot Isolation de serializabilidad, se puede utilizar una prueba de write skew. Dos transacciones leen un snapshot consistente, modifican filas diferentes y sus modificaciones conjuntas violan un invariante. Snapshot Isolation puede permitir que ambas hagan COMMIT porque no existe un conflicto WW, mientras que un sistema Serializable debe impedir esa ejecución, ya que no es equivalente a ningún orden serial.
+
+3) El protocolo **Two-Phase Commit (2PC)** coordina una transacción distribuida $T$ entre un **Coordinador ($C$)** y tres **Participantes ($P_1, P_2, P_3$)** para garantizar atomicidad global (todo o nada). 
+
+Para sobrevivir a caídas y permitir la recuperación consistente sin perder el estado, cada nodo escribe registros en su **almacenamiento persistente / WAL (Write-Ahead Log)** antes de emitir mensajes clave a la red.
+
+Fase 1: Preparación (Prepare / Voting Phase)
+
+1. El Coordinador decide iniciar el commit de la transacción:
+   * Escribe en su log durable: `START_2PC(T)`.
+   * Envía el mensaje `PREPARE` a los participantes $P_1, P_2, P_3$.
+2. Cada participante $P_i$ recibe `PREPARE` y evalúa localmente si puede confirmar sus cambios:
+   * Verifica restricciones de integridad, bloquea los recursos involucrados (locks) y asegura que puede persistir el cambio.
+   * **Si puede confirmar:**
+     * Escribe en su log durable con sincronización a disco (*fsync*): `PREPARED(T)`.
+     * Envía `VOTE_COMMIT` (o `YES`) al Coordinador.
+     * *Promesa:* A partir de este momento, $P_i$ garantiza que podrá hacer commit pase lo que pase, y retiene todos los locks hasta recibir la decisión final.
+   * **Si no puede confirmar:**
+     * Escribe en su log durable: `ABORT(T)`.
+     * Envía `VOTE_ABORT` (o `NO`) al Coordinador y aborta localmente liberando recursos.
+
+Fase 2: Decisión y Compromiso (Commit / Abort Phase)
+
+1. **Decisión del Coordinador:**
+   * **Caso Éxito Unánime:** Si recibe `VOTE_COMMIT` de los tres participantes ($P_1, P_2, P_3$):
+     * Escribe en su log durable con *fsync*: `GLOBAL_COMMIT(T)`. *(Punto formal de no retorno: la transacción se considera confirmada)*.
+     * Envía el mensaje `GLOBAL_COMMIT` a $P_1, P_2, P_3$.
+   * **Caso Falla o Timeout:** Si al menos un participante responde `VOTE_ABORT`, o si vence un timeout esperando los votos:
+     * Escribe en su log durable: `GLOBAL_ABORT(T)`.
+     * Envía el mensaje `GLOBAL_ABORT` a todos los participantes.
+2. **Ejecución en los Participantes:**
+   * Al recibir `GLOBAL_COMMIT`:
+     * Aplica definitivamente las modificaciones en sus datos.
+     * Escribe en su log durable: `COMMIT(T)`.
+     * Libera los locks retenidos.
+     * Envía un mensaje `ACK` al Coordinador.
+   * Al recibir `GLOBAL_ABORT`:
+     * Realiza rollback de las modificaciones locales.
+     * Escribe en su log durable: `ABORT(T)`.
+     * Libera los locks retenidos.
+     * Envía un mensaje `ACK` al Coordinador.
+3. **Cierre de la transacción:**
+   * Al recibir los tres `ACK`s de $P_1, P_2, P_3$, el Coordinador escribe en su log: `END(T)`. A partir de allí, la información de $T$ en el log puede archivarse o recolectarse.
+
+```
+COORDINADOR                    P1             P2             P3
+    │                          │              │              │
+[WAL: START_2PC]               │              │              │
+    ├───── PREPARE ───────────►│              │              │
+    ├───── PREPARE ──────────────────────────►│              │
+    ├───── PREPARE ─────────────────────────────────────────►│
+    │                          │              │              │
+    │                    [WAL: PREPARED] [WAL: PREPARED] [WAL: PREPARED]
+    │◄──── VOTE_COMMIT (YES) ──┤              │              │
+    │◄──── VOTE_COMMIT (YES) ─────────────────┤              │
+    │◄──── VOTE_COMMIT (YES) ────────────────────────────────┤
+    │                          │              │              │
+[WAL: GLOBAL_COMMIT] (fsync)   │              │              │
+    ├───── GLOBAL_COMMIT ─────►│              │              │
+    ├───── GLOBAL_COMMIT ────────────────────►│              │
+    ├───── GLOBAL_COMMIT ───────────────────────────────────►│
+    │                          │              │              │
+    │                    [WAL: COMMIT]  [WAL: COMMIT]  [WAL: COMMIT]
+    │                     (libera locks) (libera locks) (libera locks)
+    │◄──── ACK ────────────────┤              │              │
+    │◄──── ACK ───────────────────────────────┤              │
+    │◄──── ACK ──────────────────────────────────────────────┤
+    │                          │              │              │
+[WAL: END]                     │              │              │
+```
+
+| Entidad | Momento | Registro en WAL | ¿Requiere fsync forzado? | Propósito |
+| :--- | :--- | :--- | :---: | :--- |
+| **Coordinador** | Antes de enviar `PREPARE` | `START_2PC(T)` | No estrictamente | Registra el inicio del protocolo. |
+| **Participante** | Antes de responder `YES` | `PREPARED(T)` | **Sí** | Promete irrevocablemente poder comitear y retiene locks. |
+| **Participante** | Antes de responder `NO` | `ABORT(T)` | Sí | Cancela la transacción localmente de forma segura. |
+| **Coordinador** | Tras recibir todos los `YES` | `GLOBAL_COMMIT(T)` | **Sí** | Punto de compromiso oficial; la transacción ya es irreversible. |
+| **Coordinador** | Si hay un voto `NO` o timeout | `GLOBAL_ABORT(T)` | Sí | Cancela la transacción globalmente. |
+| **Participante** | Tras recibir la decisión | `COMMIT(T)` / `ABORT(T)` | Sí | Registra la finalización local y libera locks. |
+| **Coordinador** | Tras recibir todos los `ACK` | `END(T)` | No estrictamente | Cierra la transacción en el coordinador. |
+
+4) Análisis de una caída del coordinador en los tres momentos del protocolo:
+
+1. **Antes de `PREPARE`:**
+   * **Situación:** El coordinador se cae antes de registrar `START_2PC` o antes de enviar mensajes `PREPARE` a los participantes.
+   * **Comportamiento de los participantes:** Los participantes no recibieron ninguna solicitud de preparación. Si mantuvieron bloqueos temporales por operaciones preliminares de la transacción, al vencer sus timeouts de inactividad asumen falla del coordinador y deciden unilateralmente hacer `ABORT` local y liberar recursos.
+   * **Recuperación del coordinador:** Al reiniciar, el coordinador revisa su log; como no hay constancia de inicio de 2PC, la transacción simplemente se descarta o se aborta si el cliente reintenta. La atomicidad se preserva sin conflicto porque ningún nodo comiteó.
+
+2. **Durante `PREPARE`:**
+   * **Situación:** El coordinador escribió `START_2PC` y envió `PREPARE` a algunos o todos los participantes, pero cae antes de recibir todos los votos y antes de persistir una decisión (`GLOBAL_COMMIT` o `GLOBAL_ABORT`).
+   * **Comportamiento de los participantes:**
+     * Cualquier participante que haya votado `NO` ya abortó localmente de forma definitiva.
+     * Aquellos participantes que recibieron `PREPARE` y votaron `YES` están en estado `PREPARED`. Al vencer su timeout sin respuesta del coordinador, entran en **incertidumbre (bloqueo)**: no saben si otros participantes votaron `NO` o si el coordinador llegó a decidir algo antes de caer. Deben permanecer a la espera reteniendo todos los locks para no romper la atomicidad.
+   * **Recuperación del coordinador:** Al volver a levantarse, el coordinador lee su WAL y encuentra `START_2PC(T)` pero **ningún registro de decisión**. La regla de recuperación segura es que, ante la falta de un commit confirmado, se asume abort:
+     * Escribe `GLOBAL_ABORT(T)` en su WAL.
+     * Envía `GLOBAL_ABORT` a todos los participantes.
+     * Los participantes que estaban en `PREPARED` reciben la orden, deshacen sus cambios, liberan sus locks y el sistema se desbloquea de forma consistente.
+
+3. **Después de recibir todos los votos YES:**
+   Acá es fundamental distinguir si la decisión llegó a escribirse en el disco antes de la caída:
+   * **Subcaso A (Cae antes de escribir en disco):** Recibió todos los `YES` en memoria, pero el servidor cayó antes de completar el *fsync* de `GLOBAL_COMMIT` en el WAL.
+     * Al reiniciar, el log no contiene la decisión de commit. Siguiendo la regla de seguridad, el coordinador debe registrar `GLOBAL_ABORT(T)` y enviar abort a todos los participantes. Como ninguno había comiteado, la atomicidad se preserva.
+   * **Subcaso B (Cae después de escribir `GLOBAL_COMMIT` en el WAL):** Logró persistir `GLOBAL_COMMIT(T)` en disco, pero cayó antes de enviar el mensaje a los participantes (o mientras lo enviaba).
+     * **Estado de los participantes:** $P_1, P_2, P_3$ están en estado `PREPARED`, bloqueados a la espera de la decisión oficial.
+     * **Recuperación del coordinador:** Al reiniciarse, el coordinador lee su WAL y encuentra `GLOBAL_COMMIT(T)`. Sabe con certeza que la transacción fue formalmente confirmada. Inmediatamente retransmite `GLOBAL_COMMIT` a todos los participantes. Los participantes aplican el commit, liberan locks y responden `ACK`.
+
+La conclusión principal es que **2PC es un protocolo bloqueante**: si el coordinador cae mientras los participantes están en estado `PREPARED`, estos no pueden resolver la transacción por su cuenta y deben mantener sus recursos bloqueados hasta que el coordinador se recupere.
+
+5) Un participante en estado `PREPARED` no puede decidir unilateralmente porque **carece de información sobre el estado global del sistema** y cualquier decisión individual que tome introduce un riesgo crítico de violar la **Atomicidad** ("todo o nada"):
+
+1. **Riesgo si decidiera unilateralmente hacer ABORT:**
+   * Supongamos que el participante $P$ espera al coordinador, se vence su timeout y piensa: *"Como no responde, aborto y libero mis locks"*.
+   * **Peligro real:** Puede haber ocurrido que todos los participantes (incluido $P$) hayan respondido `VOTE_COMMIT`, el coordinador haya recolectado todos los votos, haya persistido `GLOBAL_COMMIT` en su WAL y le haya llegado a notificar el commit a los demás participantes justo antes de caerse o aislarse de la red.
+   * **Consecuencia:** Los otros participantes comitearon definitivamente, mientras que $P$ abortó. Se produjo una confirmación parcial de la transacción, rompiendo la atomicidad.
+
+2. **Riesgo si decidiera unilateralmente hacer COMMIT:**
+   * Supongamos que el participante $P$ piensa: *"Como yo voté YES y estoy listo, asumo que todo salió bien y confirmo mis cambios"*.
+   * **Peligro real:** Otro de los participantes pudo haber votado `VOTE_ABORT` (por ejemplo, por falta de saldo, violación de integridad o falla de hardware), o un timeout previo hizo que el coordinador decidiera y persistiera `GLOBAL_ABORT`.
+   * **Consecuencia:** $P$ confirmó los cambios mientras que los demás los descartaron. Nuevamente se viola la atomicidad.
+
+La idea clave:
+
+> Al emitir el voto `VOTE_COMMIT` y escribir `PREPARED` en el log, el participante **renuncia voluntariamente a su autonomía**. Transfiere la autoridad de decisión al coordinador. Queda en una "zona de incertidumbre": no puede confirmar porque otro pudo haber votado NO, y no puede cancelar porque el sistema pudo haber decidido COMMIT. Por lo tanto, está obligado a esperar bloqueado hasta recibir la decisión oficial.
+
+## Nivel 4: integración y defensa
+
+1) **2PC vs. Consenso (Paxos / Raft)**
+
+Aunque ambos son mecanismos fundamentales de coordinación distribuida, resuelven problemas conceptualmente diferentes:
+
+* **Problema que resuelve cada uno:**
+  * **2PC (Compromiso Atómico / Atomic Commitment):** Resuelve el acuerdo sobre la **confirmación atómica de transacciones distribuidas** donde los datos están particionados. La pregunta es: *"¿Todos y cada uno de los participantes pueden aplicar su parte de la transacción?"*. Requiere **unanimidad**: si un participante no puede, toda la transacción debe cancelarse.
+  * **Consenso (Paxos / Raft):** Resuelve el acuerdo sobre un **único valor o secuencia de comandos en un log replicado**. La pregunta es: *"¿Podemos ponernos de acuerdo en el próximo estado a pesar de que algunos nodos fallen?"*. Requiere **quórum mayoritario ($\lfloor n/2 \rfloor + 1$)**: los nodos son réplicas redundantes del mismo estado.
+
+* **Seguridad (Safety):**
+  * En **2PC**: Garantiza que nunca ocurrirá una ejecución parcial. Todos comitean o todos abortan. No se permite confirmación si algún participante votó abort o falló.
+  * En **Consenso**: Garantiza acuerdo (nunca se eligen dos valores distintos para la misma posición del log) y validez (el valor elegido fue propuesto por un nodo).
+
+* **Progreso (Liveness):**
+  * En **2PC**: **Es bloqueante**. Si el coordinador se cae mientras los participantes están en `PREPARED`, o si un nodo falla durante la fase de votación, el protocolo no puede avanzar. La disponibilidad se sacrifica totalmente para preservar la consistencia.
+  * En **Consenso**: **No es bloqueante ante caídas minoritarias**. En un clúster de $2f + 1$ nodos, puede tolerar la caída o desconexión de hasta $f$ nodos sin detenerse. Mientras una mayoría esté viva y comunicada, el sistema sigue procesando operaciones y comiteando.
+
+| Criterio | Two-Phase Commit (2PC) | Consenso (Paxos / Raft) |
+| :--- | :--- | :--- |
+| **Problema central** | Atomic Commitment (datos particionados) | State Machine Replication (datos replicados) |
+| **Condición de éxito** | **Unanimidad (100% de los votos)** | **Mayoría / Quórum ($> 50\%$)** |
+| **Tolerancia a fallas** | 0 fallas toleradas en votación (1 fallo detiene todo) | Tolera $f$ caídas en un grupo de $2f+1$ |
+| **Progreso (Liveness)** | Bloqueante ante caídas del coordinador | No bloqueante mientras exista quórum activo |
+| **Rol de los nodos** | Participantes heterogéneos con datos distintos | Réplicas homogéneas con copias del mismo dato |
+
+2) **Three-Phase Commit (3PC) y las particiones de red**
+
+3PC fue diseñado como una extensión de 2PC con el objetivo de ser un protocolo de compromiso **no bloqueante (non-blocking)**. Para lograrlo, divide la fase de decisión incorporando un estado intermedio: `CanCommit?` $\rightarrow$ `PreCommit` $\rightarrow$ `DoCommit`. De esta forma, ningún participante puede comitear mientras otro permanezca en la fase inicial de votación, permitiendo que ante la caída del coordinador los participantes puedan deducir el estado y resolver la transacción cooperativamente.
+
+* **Supuesto adicional que necesita 3PC:**
+  * 3PC requiere un **detector de fallas perfecto (Perfect Failure Detector)** en un modelo de **red síncrona**.
+  * Asume que existen límites máximos conocidos y estrictos de retardo de red ($\Delta$) y de velocidad de procesamiento.
+  * Con este supuesto, si expira un temporizador sin recibir mensaje de un nodo, el protocolo concluye con certeza absoluta que el nodo sufrió un *crash* (murió). No existe la posibilidad de que el mensaje esté simplemente retrasado.
+
+* **Por qué NO elimina las particiones reales:**
+  * En redes reales (asíncronas o parcialmente síncronas, como Internet o redes entre datacenters), **las particiones de red son indistinguibles de una caída de nodos**.
+  * Si la red se parte en dos subgrupos aislados:
+    * El subgrupo donde se encuentran los nodos que alcanzaron el estado `PreCommit` detecta timeout del coordinador, asume que cayó y decide avanzar cooperativamente a `DoCommit`.
+    * El otro subgrupo particionado, que quedó en `CanCommit` sin recibir el `PreCommit`, detecta timeout, asume caída del coordinador y decide abortar (`DoAbort`).
+    * **Resultado:** Se produce una situación de **Split-Brain**: un grupo confirma y el otro cancela, destruyendo por completo la atomicidad.
+  * Por el teorema FLP y los límites fundamentales del compromiso distribuido, ningún protocolo puede ser simultáneamente no bloqueante y tolerante a particiones de red arbitrarias sin basarse en consensos de quórum mayoritario. Por esta razón, 3PC tiene nula aplicación práctica en la industria.
+
+3) **Diseño de una Saga: Reserva, Pago y Emisión**
+
+Una Saga descompone una transacción distribuida en una secuencia de transacciones locales ($T_1, T_2, T_3$), donde cada servicio confirma sus cambios en su propia base de datos. Si un paso falla, se ejecutan transacciones compensatorias ($C_2, C_1$) en orden inverso para revertir semánticamente las operaciones previas.
+
+Estructura de la Saga (mediante un **Orquestador de Sagas**):
+
+| Paso ($i$) | Transacción Local ($T_i$) | Acción local | Transacción Compensatoria ($C_i$) | Acción de reversión |
+| :---: | :--- | :--- | :--- | :--- |
+| **1** | $T_1$: Reservar asiento | Bloquea el asiento en el vuelo (`PENDING`) | $C_1$: Cancelar reserva | Libera el asiento para otros usuarios |
+| **2** | $T_2$: Cobrar pasaje | Captura y debita el importe en la tarjeta | $C_2$: Reembolsar dinero | Emite un refund del importe cobrado |
+| **3** | $T_3$: Emitir ticket | Genera código de ticket y factura fiscal | $C_3$: Anular ticket | Revoca el ticket emitido *(pivote)* |
+
+* **Camino Feliz:**
+  $$ T_1 \ (\text{Reserva}) \longrightarrow T_2 \ (\text{Pago}) \longrightarrow T_3 \ (\text{Emisión}) \longrightarrow \text{Confirmado} $$
+  Cada servicio responde exitosamente al orquestador y la saga concluye con éxito.
+
+* **Flujo con Falla y Compensación:**
+  Supongamos que $T_1$ y $T_2$ se ejecutaron con éxito, pero $T_3$ falla (por ejemplo, el sistema de la aerolínea no responde o agotó el cupo de emisión):
+  $$ T_1 \longrightarrow T_2 \longrightarrow T_3 \ (\text{ERROR}) \Longrightarrow C_2 \ (\text{Reembolsar}) \longrightarrow C_1 \ (\text{Liberar asiento}) $$
+  1. El orquestador detecta el fallo irreversible en $T_3$.
+  2. Invoca $C_2$: el servicio de pagos realiza el reembolso del dinero cobrado.
+  3. Invoca $C_1$: el servicio de reservas libera el asiento bloqueado.
+  4. La saga finaliza en estado `CANCELLED`, dejando el sistema en un estado de negocio consistente.
+
+* **Idempotencia en la Saga:**
+  En una red distribuida, los mensajes de solicitud o reintento pueden duplicarse o llegar con retraso.
+  * Cada saga se crea con un identificador unívoco global (`saga_id`).
+  * Cada paso genera una **Idempotency Key** derivada (ej.: `saga_id + "-payment"`).
+  * **En transacciones normales ($T_i$):** Si se produce un timeout en $T_2$ y el orquestador reintenta el cobro, el servicio de pagos consulta su registro de transacciones procesadas con esa clave; si ya fue cobrado, responde con el comprobante anterior en vez de cobrar dos veces.
+  * **En transacciones compensatorias ($C_i$):** Las compensaciones **deben ser estrictamente idempotentes e infalibles**. Si el reembolso $C_2$ se ejecuta múltiples veces por reintentos de red, el dinero sólo se devuelve una vez y las llamadas duplicadas retornan éxito. Si un servicio compensatorio está caído, el orquestador reintenta con backoff exponencial hasta que la compensación se complete satisfactoriamente.
+
+4) **Aplicación del marco P-F-G-S-T a una transacción distribuida del Trabajo Final**
+
+Caso: **Juego en línea: Mundo virtual medieval** — Transacción distribuida de **Intercambio / Compra-venta de un ítem legendario por monedas de oro entre dos jugadores**.
+
+* **P: problema** $\rightarrow$ Transferencia atómica entre dos servicios independientes (Servicio de Inventario y Servicio de Billetera/Economía). Se debe transferir un ítem único del Jugador A al Jugador B a cambio de 5.000 monedas de oro transferidas de B hacia A. Riesgo de ejecución parcial: que se descuente el dinero sin entregar el ítem, o que se duplique el ítem en ambos inventarios (dupe exploit).
+* **F: fallas asumidas** $\rightarrow$ Pérdida de paquetes de red, timeouts en las llamadas RPC entre microservicios, caídas (*crash*) intempestivas del servidor de inventarios o de billeteras, reintentos automáticos enviados por el cliente y desconexiones de red de los jugadores en pleno intercambio.
+* **G: garantía requerida** $\rightarrow$ Atomicidad distribuida de negocio: el intercambio es todo o nada. El ítem no puede clonarse ni desaparecer, y el débito/crédito de oro debe ejecutarse exactamente una vez por cada solicitud confirmada.
+* **S: solución elegida** $\rightarrow$ Patrón **Saga Orquestada con bloqueo lógico (Escrow / Reserva temporal)** e identificación por `trade_id` único:
+  1. *Reserva del ítem:* El servicio de inventario marca el ítem de A en estado `LOCKED_IN_TRADE`.
+  2. *Reserva de fondos:* El servicio de billetera retiene las 5.000 monedas de B (pasan a saldo en custodia).
+  3. *Transferencia definitiva:* Se asigna el ítem a B y se acreditan las monedas en la cuenta de A.
+  Si el paso 2 o 3 falla, se ejecutan las compensaciones: se libera el ítem retenido a A y se reintegran las monedas a B. Cada operación registra su `trade_id` en una tabla de idempotencia para filtrar reintentos duplicados.
+* **T: trade-off aceptado** $\rightarrow$ Se prioriza consistencia e integridad frente a disponibilidad inmediata: durante los segundos que dura el intercambio, el ítem y las monedas quedan retenidos sin poder utilizarse en otras acciones del juego. Los jugadores asumen esa breve espera para eliminar cualquier riesgo de duplicación de ítems o pérdida de fondos.
+
+5) **Defensa ante comité: Criterios de elección entre Transacción Fuerte, 2PC y Saga**
+
+Ante un comité técnico de arquitectura, la elección del mecanismo de coordinación para una operación crítica se defiende en función de los límites de los datos, los requerimientos de aislamiento y el impacto en la disponibilidad:
+
+1. **Transacción Fuerte (ACID local en una única base de datos)**
+   * **Cuándo elegirla:** Cuando todas las tablas o entidades involucradas en la operación pueden convivir dentro del mismo motor relacional (o cuando el diseño de sharding permite que la transacción ocurra dentro de un único nodo mediante una clave de partición compartida).
+   * **Defensa:** Es la solución más simple, robusta y performante. Ofrece garantías matemáticas estrictas de aislamiento (Serializabilidad o Snapshot Isolation) sin overhead de red ni protocolos multipaso, evitando anomalías intermedias sin necesidad de codificar lógica de compensación manual.
+   * **Límite:** No escala horizontalmente cuando la operación involucra servicios desacoplados con bases de datos independientes.
+
+2. **Two-Phase Commit (2PC / Atomicidad distribuida estricta)**
+   * **Cuándo elegirla:** En operaciones de **muy corta duración dentro de una misma red local de baja latencia y alta confiabilidad**, donde el negocio **prohíbe estrictamente la visibilidad de cualquier estado intermedio incoherente**, ni siquiera por fracciones de segundo (ej.: transferencias contables entre particiones de un core financiero, o motores con soporte nativo de transacciones distribuidas como Google Spanner / CockroachDB).
+   * **Defensa:** Asegura consistencia inmediata y aislamiento atómico global: ningún cliente puede observar fondos debitados antes de que se hayan acreditado en el destino.
+   * **Trade-off:** Alto acoplamiento temporal y fragilidad en disponibilidad: los recursos quedan bloqueados con locks durante las dos fases. Si el coordinador cae durante la votación, el sistema se bloquea. Resulta inviable para operaciones que involucren APIs externas o redes públicas con latencias impredecibles.
+
+3. **Saga (Consistencia eventual con compensaciones)**
+   * **Cuándo elegirla:** En arquitecturas de **microservicios**, procesos de negocio de **larga duración (long-running transactions)**, o cuando la transacción involucra **servicios externos o APIs de terceros** (ej.: procesadores de pago, logística, aerolíneas) donde es técnica o comercialmente imposible retener locks de base de datos.
+   * **Defensa:** Maximiza la disponibilidad y escalabilidad horizontal del sistema. Cada servicio realiza commits locales rápidos sin bloquear recursos de otros servicios. Si ocurre un error, el sistema recupera la consistencia mediante transacciones compensatorias.
+   * **Trade-off:** Pérdida de aislamiento estricto (los estados intermedios son visibles al sistema) y mayor complejidad de desarrollo (requiere diseñar compensaciones para cada paso y garantizar idempotencia en todos los endpoints).
+
+| Criterio de evaluación | Transacción Fuerte (Local) | 2PC (Distribuido Estricto) | Saga (Consistencia Eventual) |
+| :--- | :--- | :--- | :--- |
+| **Alcance de los datos** | Misma base de datos | Múltiples nodos / motores homogéneos | Múltiples microservicios / APIs heterogéneas |
+| **Aislamiento** | Total (ACID nativo) | Alto (locks distribuidos) | Bajo (estados intermedios visibles) |
+| **Disponibilidad** | Máxima localmente | Baja (bloqueante ante caídas) | Muy alta (desacoplada y asíncrona) |
+| **Latencia / Throughput** | Óptimo (microsegundos) | Degradado (múltiples viajes de red) | Alto (commits locales asíncronos) |
+| **Complejidad de código** | Mínima (provista por el DBMS) | Media (coordinación transaccional) | Alta (orquestación, compensaciones, idempotencia) |
+
+**Regla de oro de defensa:**
+> *"Diseñar para **Transacción Fuerte local** siempre que el dominio lo permita. Si la operación involucra múltiples microservicios o dependencias externas, optar por una **Saga con idempotencia y reservas lógicas**. Reservar **2PC** exclusivamente para aquellos escenarios donde el negocio exija consistencia inmediata innegociable y la infraestructura garantice redes locales de latencia mínima y controlada."*
