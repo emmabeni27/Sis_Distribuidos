@@ -1,3 +1,5 @@
+https://chatgpt.com/share/6aa2baf0-a05c-83e9-8e23-2e7f207827ae
+
 ## Nivel 1: fundamentos y reconocimiento
 
 1) **ATOMICIDAD**: Una transacción se ejecuta completamente o no se ejecuta nada.
@@ -341,9 +343,9 @@ A = 100
 pero T2 ya había observado 50. Es decir, T2 pudo tomar decisiones basándose en un valor que finalmente no existió de manera válida.
 
 2) Non-repeatable read ocurre cuando una transacción lee dos veces el mismo dato y obtiene valores diferentes, porque otra transacción lo modificó y confirmó entre ambas lecturas. 
-![img.png](img.png)
+![img.png](images/img.png)
 Una non-repeatable read ocurre cuando una transacción lee dos veces el mismo dato y obtiene valores diferentes debido a una actualización confirmada por otra transacción entre ambas lecturas. Es posible en READ COMMITTED, pero no en REPEATABLE READ ni en SERIALIZABLE.
-![img_1.png](img_1.png)
+![img_1.png](images/img_1.png)
 |                                   | Dirty read                     | Non-repeatable read                    |
 | --------------------------------- | ------------------------------ | -------------------------------------- |
 | ¿Cuántas veces lee T1?            | Una puede alcanzar             | **Dos**                                |
@@ -546,3 +548,106 @@ $$ \boxed{\text{Snapshot Isolation evita WW, pero no garantiza la ausencia de wr
 Y esta es justamente una de las diferencias importantes entre Snapshot Isolation y Serializable: Serializable debe impedir también estas dependencias que, aunque no sean WW directos, producen un resultado no serializable.
 
 ## Nivel 3: diseño y comparación
+
+1) Cuanto más fuerte es el nivel, menos anomalías permite. 
+| Nivel                  | Dirty read | Non-repeatable read |                       Phantom read | Write skew |
+| ---------------------- | ---------: | ------------------: | ---------------------------------: | ---------: |
+| **Read Committed**     |          ❌ |                   ✅ |                                  ✅ |          ✅ |
+| **Repeatable Read**    |          ❌ |                   ❌ |    ⚠️ depende de la implementación |          ✅ |
+| **Snapshot Isolation** |          ❌ |                   ❌ | ❌ en el snapshot de la transacción |          ✅ |
+| **Serializable**       |          ❌ |                   ❌ |                                  ❌ |          ❌ |
+
+1. Read Committed
+
+Solo permite leer datos que ya fueron confirmados.
+
+Por eso:
+
+❌ Dirty read: no podés leer un cambio no confirmado.
+✅ Non-repeatable read: otra transacción puede modificar y confirmar el dato entre tus dos lecturas.
+✅ Phantom read: otra transacción puede insertar/eliminar filas que cumplen tu WHERE.
+✅ Write skew: las transacciones pueden leer un estado consistente y modificar filas distintas de forma que rompan un invariante.
+2. Repeatable Read
+
+Garantiza que si leíste una fila, al volver a leerla durante la transacción no vas a obtener un valor diferente.
+
+Por eso:
+
+❌ Dirty read
+❌ Non-repeatable read
+⚠️ Phantom read: depende de cómo esté implementado el nivel en el DBMS. En algunos sistemas puede ocurrir.
+✅ Write skew: puede ocurrir porque dos transacciones pueden leer datos consistentes y escribir filas diferentes.
+3. Snapshot Isolation
+
+Cada transacción trabaja sobre un snapshot consistente de la base.
+
+Por eso no ve los cambios que otras transacciones confirman después de que comenzó.
+
+❌ Dirty read
+❌ Non-repeatable read
+❌ Phantom read dentro del snapshot
+✅ Write skew
+
+Y acá está la parte importante que vimos antes:
+
+Snapshot Isolation evita WW, pero write skew no necesita WW.
+
+Ejemplo:
+
+T1 lee M2 → está de guardia
+T2 lee M1 → está de guardia
+
+T1 escribe M1 → se va
+T2 escribe M2 → se va
+
+Escriben filas diferentes, así que SI puede permitir que ambas hagan COMMIT.
+
+4. Serializable
+
+Es el nivel más fuerte.
+
+La ejecución concurrente debe producir un resultado equivalente a algún orden serial.
+
+Por lo tanto, no permite las anomalías anteriores:
+
+❌ Dirty read
+❌ Non-repeatable read
+❌ Phantom read
+❌ Write skew
+
+En particular, en el caso de los médicos, el sistema tendría que impedir que ambas transacciones confirmen simultáneamente porque el resultado no sería equivalente a ninguna ejecución serial.
+
+Read Committed
+    ↓
+"Solo veo COMMIT"
+    ↓
+Repeatable Read
+    ↓
+"Lo que leí no cambia"
+    ↓
+Snapshot Isolation
+    ↓
+"Veo un snapshot fijo"
+    ↓
+Serializable
+    ↓
+"Es como si fueran una por una"
+
+Snapshot Isolation es muy fuerte contra lecturas inconsistentes y conflictos WW, pero no garantiza serializabilidad porque puede permitir write skew. Serializable sí evita write skew.
+
+2) La prueba para diferenciar snapshot isolation de serializabilidad real es write skew porque SI lo puede permitir meitnras que serializable real no. 
+En el caso de los dos méricos, la invariante es M1 + M2 >= 1. Si ejecutoen simultáneo dos transacciones:
+
+T1 (M1):                 T2 (M2):
+
+R(M2) → de guardia       R(M1) → de guardia
+W(M1) → fuera            W(M2) → fuera
+COMMIT                   COMMIT
+
+![img.png](images/img.png)
+![img_1.png](images/img_1.png)
+![img_2.png](images/img_2.png)
+
+SI detecta los WW, la clave está en construir un caso donde cada trnsacción escriba algo distinto pero las dos juntas rompan una regla.
+
+Para diferenciar Snapshot Isolation de serializabilidad, se puede utilizar una prueba de write skew. Dos transacciones leen un snapshot consistente, modifican filas diferentes y sus modificaciones conjuntas violan un invariante. Snapshot Isolation puede permitir que ambas hagan COMMIT porque no existe un conflicto WW, mientras que un sistema Serializable debe impedir esa ejecución, ya que no es equivalente a ningún orden serial.
